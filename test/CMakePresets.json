@@ -1,0 +1,45 @@
+{
+    "version": 6,
+    "configurePresets": [
+        {
+            "name": "test",
+            "displayName": "Host unit tests",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "coverage",
+            "displayName": "Host unit tests with coverage report",
+            "inherits": "test",
+            "binaryDir": "${sourceDir}/build-coverage",
+            "cacheVariables": {
+                "COVERAGE": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "test",
+            "configurePreset": "test"
+        },
+        {
+            "name": "coverage",
+            "configurePreset": "coverage",
+            "targets": [
+                "coverage"
+            ]
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "test",
+            "configurePreset": "test",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}
