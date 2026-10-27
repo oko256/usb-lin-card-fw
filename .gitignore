@@ -43,6 +43,7 @@
 build/
 Build/
 build-*/
+__pycache__/
 
 # CMake generated files
 CMakeFiles/

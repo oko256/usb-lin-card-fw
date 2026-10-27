@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.22)
 #
 
 # Version information
-set(FIRMWARE_VERSION "4" CACHE STRING "Firmware version number (unsigned integer)")
+set(FIRMWARE_VERSION "5" CACHE STRING "Firmware version number (unsigned integer)")
 set(HARDWARE_VERSION "3" CACHE STRING "Hardware version number (unsigned integer)")
 
 # Setup compiler settings

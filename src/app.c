@@ -85,18 +85,6 @@ static void s_apply_configured_tables(void)
     s_apply_tables(schedule, schedule_count, true, frames, frames_count);
 }
 
-/// Resets the responder to wait for the next BREAK, keeping its configuration. Setting new frames
-/// keeps a header that is being received, but after a mode change it must not be continued.
-static void s_reset_responder(void)
-{
-    const uint32_t      irq    = board_irq_save();
-    const minlin_config config = s_responder.config;
-    minlin_responder_init(&s_responder);
-    s_responder.config = config;
-    s_rx_break         = false;
-    board_irq_restore(irq);
-}
-
 /// Runs commander and responder, and finishes the single frame transmit when it's done.
 static void s_run_commander_and_responder(uint32_t now_ms)
 {
@@ -150,14 +138,12 @@ static void s_handle_cmd(slcan_cmd cmd)
     case SLCAN_CMD_OPEN:
     case SLCAN_CMD_CLOSE:
         // Start from a clean state: schedule from the beginning and no stale responder state.
-        s_reset_responder();
         s_apply_configured_tables();
         break;
     case SLCAN_CMD_START_MONITORING: {
         const uint32_t irq = board_irq_save();
         lin_monitor_reset(&s_monitor);
         board_irq_restore(irq);
-        s_reset_responder();
         s_apply_tables(NULL, 0, false, NULL, 0);
     } break;
     case SLCAN_CMD_SET_ENHANCED_CHECKSUM:

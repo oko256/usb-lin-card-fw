@@ -1,0 +1,6 @@
+[submodule "mcutils"]
+	path = mcutils
+	url = https://github.com/oko256/mcutils.git
+[submodule "minlin"]
+	path = minlin
+	url = https://github.com/oko256/minlin.git

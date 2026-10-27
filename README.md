@@ -16,7 +16,8 @@ This README has separate sections for [user guide](#user-guide) to get you start
 the firmware, and for [developer notes](#developer-notes) to help you develop the firmware itself
 further.
 
----
+Some of the files in this repository is under ST's licenses, and those files keep their respective
+licenses regardless of the root LICENSE file.
 
 # User guide
 
@@ -208,8 +209,6 @@ candump can0                    # dump all received frames, you could also use w
 - **LIN features not implemented:**
   - Sleep and wake-up: no go-to-sleep command handling, and no wake-up pulse detection or generation.
   - Event-triggered frame collision resolution.
-
----
 
 # Developer notes
 
