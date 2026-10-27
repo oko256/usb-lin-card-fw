@@ -1,0 +1,7 @@
+[files]
+extend-exclude = ["Drivers", "Middlewares", "*.ld"]
+
+[default.extend-words]
+HSI = "HSI"
+SIZ = "SIZ"
+PTD = "PTD"
