@@ -1,7 +1,8 @@
 # USB LIN Card firmware
 
-Firmware for the USB LIN Card. The card is an STM32F042 based USB to LIN bus adapter. On the PC it
-shows up as a USB CDC serial port that speaks an slcan-like text protocol. With it the card can:
+Firmware for the [USB LIN Card](https://github.com/oko256/usb-lin-card-hw).
+The card is an STM32F042 based USB to LIN bus adapter. On the PC it shows up as a USB CDC serial
+port that speaks an slcan-like text protocol. With it the card can:
 
 - act as a LIN **commander** (master): run a header schedule and publish command frames,
 - act as a LIN **responder** (slave): publish responses and subscribe to frames,
@@ -273,7 +274,7 @@ Run against two cards on the same LIN bus (with bus power and termination). Need
 cd test_sys
 pytest                    # ~70 s
 pytest -m "not slow"      # skip timing and soak tests, ~25 s
-pytest --dev1 /dev/ttyACM0 --dev2 /dev/ttyACM1 --soak-seconds 300
+pytest --dev1=/dev/ttyACM0 --dev2=/dev/ttyACM1 --soak-seconds=300
 ```
 
 - Ports default to `/tmp/tty-lin-master` and `/tmp/tty-lin-slave` which can be used as convenient
