@@ -1,15 +1,19 @@
 # CI WORKFLOW
 # ===========
-# Parallel jobs on pushes to main branches, and on all pull requests, for:
+# Runs on pushes to main, on "v*" tags, and on all pull requests.
+# Parallel jobs for:
 # 1. typos spell check
 # 2. clang-format check (same directories as run-clang-format.sh)
 # 3. build and run host unit tests (test/)
+# 4. build the firmware binary
+# After all of the above pass on a "v*" tag:
+# 5. publish a GitHub release with the firmware binaries
 
 name: CI
 on:
   push:
-    # List all long-running branches here that you want to run CI on:
-    branches: [main, master]
+    branches: [main]
+    tags: ['v*']
   pull_request:
 
 # Cancel redundant runs: if a new commit is pushed to a PR branch, cancel the previous runs
@@ -87,3 +91,83 @@ jobs:
 
       - name: Run tests
         run: ctest --preset test
+
+  # =========================
+  # Job 4: build the firmware
+  # =========================
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # Recommended for checkout action
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: true # minlin and mcutils are built into the firmware
+
+      - name: Check tag matches FIRMWARE_VERSION
+        if: github.ref_type == 'tag'
+        run: |
+          if ! grep -q "set(FIRMWARE_VERSION \"${GITHUB_REF_NAME#v}\"" CMakeLists.txt; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match FIRMWARE_VERSION in CMakeLists.txt"
+            exit 1
+          fi
+
+      - uses: carlosperate/arm-none-eabi-gcc-action@49f4db4520f840e77ab1e99b24cfac2c540a21b1 # v1.14.1
+        with:
+          release: '14.2.Rel1'
+
+      - name: Install CMake
+        uses: lukka/get-cmake@ea83089aa35e08e459464341fe24ad024ee2466f # v4.3.1
+
+      - name: Configure
+        run: cmake --preset Release
+
+      - name: Build
+        run: cmake --build --preset Release
+
+      - name: Collect artifacts
+        env:
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.event.pull_request.head.sha || github.sha }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" != tag ]; then VERSION="${VERSION::7}"; fi
+          mkdir -p dist
+          NAME="$REPO_NAME-$VERSION"
+          cp "build/Release/usb-lin-card-fw.elf" "dist/$NAME.elf"
+          arm-none-eabi-objcopy -O binary "dist/$NAME.elf" "dist/$NAME.bin"
+          arm-none-eabi-objcopy -O ihex "dist/$NAME.elf" "dist/$NAME.hex"
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firmware
+          path: dist/*
+
+  # =============================================
+  # Job 5: publish a release for a tagged version
+  # =============================================
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [typos, formatting, unit-tests, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: firmware
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
