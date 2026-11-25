@@ -85,7 +85,6 @@ def test_replaced_response(dev1, dev2):
     time.sleep(0.2)
     assert dev2.frames() == []  # Not reported before t2.
     dev2.cmd_ok(t2(0x10, bytes.fromhex("CAFEBABE")))
-    dev1.clear_frames()
     frames = dev1.collect_frames(0.5)
     # The first one may have been published before the replace.
     assert len(frames) >= 20

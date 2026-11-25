@@ -108,9 +108,9 @@ const minlin_schedule_entry* slcan_single_frame_schedule(void);
 /// Returns the responder frame of the single frame.
 minlin_frame*                slcan_single_frame(void);
 
-/// Application calls this after @p frame of the configured responder table has been published.
-/// Reports the frame to the client if its response is managed with "t2" or "t3", and then moves the
-/// next queued response (if any) into the frame for its next publish.
+/// Application calls this after @p frame, an entry of slcan_responder_frames(), has been published.
+/// Reports the frame to the client if its response has been changed with "t2" or "t3", and moves
+/// the next queued response (if any) into it.
 void slcan_response_published(minlin_frame* frame);
 
 /// Returns the maximum time in milliseconds a single byte can take with current baud rate.

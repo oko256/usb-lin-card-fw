@@ -250,7 +250,7 @@ void test_replace_response(void)
     s_expect("T0120001421234", OK, SLCAN_CMD_RELOAD_COMMANDER_AND_RESPONDER);
     minlin_frame* frames = slcan_responder_frames(&count);
 
-    // Not managed with t2/t3 yet: publishes aren't reported.
+    // Not changed with t2/t3 yet: publishes aren't reported.
     usb_out_clear();
     slcan_response_published(&frames[1]);
     TEST_ASSERT_EQUAL_STRING("", g_usb_out);

@@ -113,33 +113,29 @@ Changes take effect immediately. When the channel is open, the schedule then res
 All of them reply CR, or BEL if the command is malformed or a needed table is full. `R0`, `r0` and
 `T0` need room in both tables.
 
+The automatic slot time of `r0` and `t0` is the LIN maximum frame time with a 2.0 margin instead of 1.4:
+`ceil((88 + 20 × l) bit times)`. E.g. 6 ms for 1 byte and 13 ms for 8 bytes at 19200 baud.
+
 ### Changing published responses
 
-These change the response of a published ID (added with `t1` or `T0`) in place. The tables are
-not reloaded, so the schedule doesn't restart, and no frame in progress is dropped.
+These change the response of a published ID (added with `t1` or `T0`) in place. The tables
+aren't reloaded, so the schedule doesn't restart and no frame in progress is dropped.
 
 | Command | Description |
 |---|---|
-| `t2iildd...` | Replace the response of ID `ii` with `dd...`, from its next publish on. Also clears the responses queued for `ii`. |
+| `t2iildd...` | Replace the response of ID `ii` with `dd...`. Also clears the responses queued for `ii`. |
 | `t3iildd...` | Queue the response `dd...` for ID `ii`. After each publish of `ii`, the next queued response replaces its response. When the queue is empty, the last response keeps being published. |
 
-- **The queue** holds at most **16** responses, all for one ID at a time.
-- **Replies:** both reply CR. They reply BEL if:
-  - the line is malformed;
-  - `ii` isn't a published ID;
-  - `l` differs from the ID's payload length.
-
-  `t3` also replies BEL if the queue is full, or if it holds responses for another ID.
-- **Reporting:** once an ID's response has been changed with `t2` or `t3`, each of its publishes is reported like a
-  received frame (see [Received frames](#received-frames)). So a client can keep the queue filled
-  and know what was sent.
+- **The queue** holds up to **16** responses, all for the same ID.
+- **Replies:** CR on success. BEL if the line is malformed, `ii` isn't a published ID, or `l`
+  differs from its payload length. `t3` also gives BEL if the queue is full or holds responses for
+  another ID.
+- **Reporting:** once an ID's response has been changed with `t2` or `t3`, each of its publishes is
+  reported like a received frame. So a client can keep the queue filled and see what was sent.
 - **Lifetime:** `w` clears the queue and stops the reporting.
 
-A response counts as published once the card has started sending it. In rare cases a new BREAK
-interrupts the response, and it is then still reported.
-
-The automatic slot time of `r0` and `t0` is the LIN maximum frame time with a 2.0 margin instead of 1.4:
-`ceil((88 + 20 × l) bit times)`. E.g. 6 ms for 1 byte and 13 ms for 8 bytes at 19200 baud.
+A publish is reported when the card answers the header. In rare cases a new BREAK comes right after
+the header, and the response isn't sent even though it was reported.
 
 ### Transmit single frame
 
@@ -283,6 +279,10 @@ STM32_Programmer_CLI -c port=usb1 -w build/Debug/usb-lin-card-fw.elf -g
   isn't re-armed (host gets NAKs); `CDC_Service_Rx()` retries from the main loop.
 - **Mode changes** (`O`/`C`/`L`) fully reset the minlin responder; `minlin_responder_set_frames()`
   alone keeps a half-received header.
+- **Changing responses (`t2`/`t3`)** writes the payload of a responder table entry in place. minlin
+  reads payloads only in `minlin_responder_task()`, which runs in the main loop like the command
+  processing. After a publish, `app.c` hands the frame to `slcan_response_published()`, which
+  reports it and moves the next queued response in.
 - **Single frame (`t0`)** temporarily replaces the minlin tables with one-entry tables. It is done when
   the commander has stopped and the slot time has passed (not on the echo). Then the configured
   tables are restored (open mode) or cleared (monitoring mode), and table changes made meanwhile are

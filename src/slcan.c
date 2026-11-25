@@ -48,8 +48,8 @@ static uint8_t  s_queue[SLCAN_RESPONSE_QUEUE_SIZE][MINLIN_MAX_PAYLOAD_BYTES];
 static uint8_t  s_queue_head      = 0;
 static uint8_t  s_queue_count     = 0;
 static uint8_t  s_queue_id        = 0;
-/// Bit mask of the responder frames (by index) whose responses are managed with "t2" or "t3"; their
-/// publishes are reported to the client.
+/// Bit mask of the responder frames (by index) whose responses have been changed with "t2" or
+/// "t3"; their publishes are reported to the client.
 static uint32_t s_reported_frames = 0;
 
 _Static_assert((SLCAN_RESPONSE_QUEUE_SIZE & (SLCAN_RESPONSE_QUEUE_SIZE - 1)) == 0, "queue size must be a power of 2");
@@ -171,13 +171,19 @@ static void s_add_responder_frame(uint8_t id, minlin_frame_type type, uint8_t pa
     s_responder_frames_count++;
 }
 
-/// Returns the index of the first publish entry for @p id in the responder table, or -1 if there's
-/// none or its payload size isn't @p payload_size.
-static int s_find_publish_frame(uint8_t id, uint8_t payload_size)
+/// Parses "t2"/"t3" arguments "iildd..." into @p out_id and @p out_payload. Returns the index of the
+/// first publish entry for the ID in the responder table, or -1 if the line is malformed, there's
+/// no such entry, or its payload length isn't l.
+static int s_parse_response_change(uint8_t* out_id, uint8_t* out_payload)
 {
+    uint8_t payload_size = 0;
+    if (!s_parse_id(2, out_id) || !s_parse_payload_size(4, &payload_size)
+        || !s_parse_payload(5, payload_size, out_payload)) {
+        return -1;
+    }
     for (uint8_t i = 0; i < s_responder_frames_count; ++i) {
         const minlin_frame* frame = &s_responder_frames[i];
-        if (frame->id == id && frame->type == MINLIN_PUBLISH) {
+        if (frame->id == *out_id && frame->type == MINLIN_PUBLISH) {
             return frame->payload_size == payload_size ? i : -1;
         }
     }
@@ -463,22 +469,17 @@ static slcan_cmd s_cmd_add_response(void)
 
 /**
  * "t2iildd...": Replace the response of the publish entry of ID ii (added with "t1" or "T0") with
- * payload length l (1-8, same as the entry's) and payload data dd... (in hex, length number of
- * bytes). Takes effect from the next header without reloading the tables, and clears the responses
- * queued for the ID with "t3". From now on, the entry's publishes are reported to the client.
+ * payload dd... of the entry's length l, without reloading the tables. Also clears the responses
+ * queued for ii, and starts reporting the entry's publishes.
  */
 static void s_cmd_replace_response(void)
 {
-    uint8_t id           = 0;
-    uint8_t payload_size = 0;
-    uint8_t payload[MINLIN_MAX_PAYLOAD_BYTES];
-    int     index = -1;
-    if (s_parse_id(2, &id) && s_parse_payload_size(4, &payload_size) && s_parse_payload(5, payload_size, payload)) {
-        index = s_find_publish_frame(id, payload_size);
-    }
+    uint8_t   id = 0;
+    uint8_t   payload[MINLIN_MAX_PAYLOAD_BYTES];
+    const int index = s_parse_response_change(&id, payload);
     if (index >= 0) {
         minlin_frame* frame = &s_responder_frames[index];
-        for (uint8_t i = 0; i < payload_size; ++i) {
+        for (uint8_t i = 0; i < frame->payload_size; ++i) {
             frame->payload[i] = payload[i];
         }
         s_reported_frames |= UINT32_C(1) << index;
@@ -490,32 +491,27 @@ static void s_cmd_replace_response(void)
 }
 
 /**
- * "t3iildd...": Queue a response for the publish entry of ID ii (added with "t1" or "T0") with
- * payload length l (1-8, same as the entry's) and payload data dd... (in hex, length number of
- * bytes). After each publish of the entry, the next queued response replaces its response. The
- * queue holds the responses of one ID at a time. From now on, the entry's publishes are reported to
- * the client.
+ * "t3iildd...": Queue the response dd... for the publish entry of ID ii (added with "t1" or "T0"),
+ * of the entry's length l. After each publish of the entry, slcan_response_published() moves the
+ * next queued response into it. The queue holds the responses of one ID at a time. Also starts
+ * reporting the entry's publishes.
  */
 static void s_cmd_queue_response(void)
 {
-    uint8_t id           = 0;
-    uint8_t payload_size = 0;
-    uint8_t payload[MINLIN_MAX_PAYLOAD_BYTES];
-    int     index = -1;
-    if (s_parse_id(2, &id) && s_parse_payload_size(4, &payload_size) && s_parse_payload(5, payload_size, payload)
-        && s_queue_count < SLCAN_RESPONSE_QUEUE_SIZE && (s_queue_count == 0 || s_queue_id == id)) {
-        index = s_find_publish_frame(id, payload_size);
-    }
-    if (index >= 0) {
+    uint8_t    id = 0;
+    uint8_t    payload[MINLIN_MAX_PAYLOAD_BYTES];
+    const int  index = s_parse_response_change(&id, payload);
+    const bool ok = index >= 0 && s_queue_count < SLCAN_RESPONSE_QUEUE_SIZE && (s_queue_count == 0 || s_queue_id == id);
+    if (ok) {
         uint8_t* slot = s_queue[(s_queue_head + s_queue_count) & (SLCAN_RESPONSE_QUEUE_SIZE - 1)];
-        for (uint8_t i = 0; i < payload_size; ++i) {
+        for (uint8_t i = 0; i < s_responder_frames[index].payload_size; ++i) {
             slot[i] = payload[i];
         }
         s_queue_count++;
         s_queue_id = id;
         s_reported_frames |= UINT32_C(1) << index;
     }
-    s_reply(index >= 0);
+    s_reply(ok);
 }
 
 /**
@@ -745,7 +741,7 @@ void slcan_send_frame(const minlin_frame* frame)
 void slcan_response_published(minlin_frame* frame)
 {
     const ptrdiff_t index = frame - s_responder_frames;
-    if (index < 0 || index >= s_responder_frames_count || (s_reported_frames & (UINT32_C(1) << index)) == 0) {
+    if ((s_reported_frames & (UINT32_C(1) << index)) == 0) {
         return;
     }
     slcan_send_frame(frame);
