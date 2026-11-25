@@ -242,6 +242,108 @@ void test_tables_full(void)
     TEST_ASSERT_EQUAL(SLCAN_TABLE_MAX_SIZE, s_frames_count());
 }
 
+void test_replace_response(void)
+{
+    uint8_t count = 0;
+    s_expect("r1214", OK, SLCAN_CMD_RELOAD_COMMANDER_AND_RESPONDER);
+    s_expect("t1222AABB", OK, SLCAN_CMD_RELOAD_COMMANDER_AND_RESPONDER);
+    s_expect("T0120001421234", OK, SLCAN_CMD_RELOAD_COMMANDER_AND_RESPONDER);
+    minlin_frame* frames = slcan_responder_frames(&count);
+
+    // Not changed with t2/t3 yet: publishes aren't reported.
+    usb_out_clear();
+    slcan_response_published(&frames[1]);
+    TEST_ASSERT_EQUAL_STRING("", g_usb_out);
+
+    // Replaces the payload in place; no table reload is needed.
+    s_expect("t2222CCDD", OK, SLCAN_CMD_NONE);
+    TEST_ASSERT_EQUAL_HEX8(0xCC, frames[1].payload[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xDD, frames[1].payload[1]);
+    s_expect("t2122ABCD", OK, SLCAN_CMD_NONE);
+    TEST_ASSERT_EQUAL_HEX8(0xAB, frames[2].payload[0]);
+    TEST_ASSERT_EQUAL_HEX8(0xCD, frames[2].payload[1]);
+    TEST_ASSERT_EQUAL(3, s_frames_count());
+
+    // Now the publishes are reported; the payload stays (nothing queued).
+    usb_out_clear();
+    slcan_response_published(&frames[1]);
+    TEST_ASSERT_EQUAL_STRING("t0222CCDD" OK, g_usb_out);
+    usb_out_clear();
+    slcan_response_published(&frames[1]);
+    TEST_ASSERT_EQUAL_STRING("t0222CCDD" OK, g_usb_out);
+
+    // Subscription, unknown ID, wrong length, and malformed lines.
+    s_expect("t2214AABBCCDD", ERR, SLCAN_CMD_NONE);
+    s_expect("t2302AABB", ERR, SLCAN_CMD_NONE);
+    s_expect("t2221AA", ERR, SLCAN_CMD_NONE);
+    s_expect("t2223AABBCC", ERR, SLCAN_CMD_NONE);
+    s_expect("t2222AAXX", ERR, SLCAN_CMD_NONE);
+    s_expect("t2222AABBCC", ERR, SLCAN_CMD_NONE);
+    s_expect("t4222AABB", ERR, SLCAN_CMD_NONE);
+    TEST_ASSERT_EQUAL_HEX8(0xCC, frames[1].payload[0]);
+}
+
+void test_queue_response(void)
+{
+    uint8_t count = 0;
+    char    line[24];
+    s_expect("t1222AABB", OK, SLCAN_CMD_RELOAD_COMMANDER_AND_RESPONDER);
+    s_expect("t1231EE", OK, SLCAN_CMD_RELOAD_COMMANDER_AND_RESPONDER);
+    minlin_frame* frames = slcan_responder_frames(&count);
+    for (int i = 0; i < SLCAN_RESPONSE_QUEUE_SIZE; ++i) {
+        snprintf(line, sizeof(line), "t32220%X00", i);
+        s_expect(line, OK, SLCAN_CMD_NONE);
+    }
+    s_expect("t3222FFFF", ERR, SLCAN_CMD_NONE);
+    // Queuing doesn't change the current response.
+    TEST_ASSERT_EQUAL_HEX8(0xAA, frames[0].payload[0]);
+
+    // Each publish is reported, and then the next queued response takes its place.
+    usb_out_clear();
+    slcan_response_published(&frames[0]);
+    TEST_ASSERT_EQUAL_STRING("t0222AABB" OK, g_usb_out);
+    for (int i = 0; i < SLCAN_RESPONSE_QUEUE_SIZE; ++i) {
+        snprintf(line, sizeof(line), "t02220%X00" OK, i);
+        usb_out_clear();
+        slcan_response_published(&frames[0]);
+        TEST_ASSERT_EQUAL_STRING(line, g_usb_out);
+        if (i == 0) {
+            // There's room again (the queue is a ring).
+            s_expect("t32221234", OK, SLCAN_CMD_NONE);
+        }
+    }
+    usb_out_clear();
+    slcan_response_published(&frames[0]);
+    TEST_ASSERT_EQUAL_STRING("t02221234" OK, g_usb_out);
+    // The queue is empty: the last response stays.
+    usb_out_clear();
+    slcan_response_published(&frames[0]);
+    TEST_ASSERT_EQUAL_STRING("t02221234" OK, g_usb_out);
+
+    // The queue holds one ID at a time.
+    s_expect("t32220102", OK, SLCAN_CMD_NONE);
+    s_expect("t3231EF", ERR, SLCAN_CMD_NONE);
+    s_expect("t3222AA", ERR, SLCAN_CMD_NONE);
+    // Replacing the response of another ID keeps the queue; of the queue's ID clears it.
+    s_expect("t2231EF", OK, SLCAN_CMD_NONE);
+    s_expect("t3222AA", ERR, SLCAN_CMD_NONE);
+    s_expect("t2222CAFE", OK, SLCAN_CMD_NONE);
+    usb_out_clear();
+    slcan_response_published(&frames[0]);
+    TEST_ASSERT_EQUAL_STRING("t0222CAFE" OK, g_usb_out);
+    TEST_ASSERT_EQUAL_HEX8(0xCA, frames[0].payload[0]);
+    s_expect("t3231EF", OK, SLCAN_CMD_NONE);
+
+    // Wipe clears the queue and the reporting.
+    s_expect("w", OK, SLCAN_CMD_RELOAD_COMMANDER_AND_RESPONDER);
+    s_expect("t3231EF", ERR, SLCAN_CMD_NONE);
+    s_expect("t1231EE", OK, SLCAN_CMD_RELOAD_COMMANDER_AND_RESPONDER);
+    usb_out_clear();
+    slcan_response_published(&frames[0]);
+    TEST_ASSERT_EQUAL_STRING("", g_usb_out);
+    TEST_ASSERT_EQUAL_HEX8(0xEE, frames[0].payload[0]);
+}
+
 void test_single_frame(void)
 {
     // Not allowed when closed.
@@ -358,6 +460,8 @@ int main(void)
     RUN_TEST(test_add_subscription_and_response);
     RUN_TEST(test_add_scheduled_transmit);
     RUN_TEST(test_tables_full);
+    RUN_TEST(test_replace_response);
+    RUN_TEST(test_queue_response);
     RUN_TEST(test_single_frame);
     RUN_TEST(test_bootloader);
     RUN_TEST(test_unknown_and_empty_lines);

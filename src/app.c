@@ -25,6 +25,10 @@ static lin_monitor      s_monitor;
 /// via minlin_hw_check_and_clear_break().
 static bool s_rx_break = false;
 
+/// Frame of the configured responder table published by the responder task, if any; handed to
+/// slcan after the task, when minlin no longer needs its payload.
+static minlin_frame* s_published_frame = NULL;
+
 /// Receive activity for the LED indication.
 static volatile uint32_t s_last_rx_ms         = 0;
 static volatile bool     s_rx_seen            = false;
@@ -41,8 +45,10 @@ void minlin_responder_subscribe_callback(const minlin_frame* frame) { slcan_send
 
 bool minlin_responder_publish_callback(minlin_frame* frame)
 {
-    (void)frame; // UNUSED
     // Payload we want to publish is already stored in the frame struct.
+    if (frame != slcan_single_frame()) {
+        s_published_frame = frame;
+    }
     return true;
 }
 
@@ -90,6 +96,10 @@ static void s_run_commander_and_responder(uint32_t now_ms)
 {
     s_latch_minlin_result(minlin_commander_task(&s_commander, now_ms));
     s_latch_minlin_result(minlin_responder_task(&s_responder));
+    if (s_published_frame != NULL) {
+        slcan_response_published(s_published_frame);
+        s_published_frame = NULL;
+    }
 
     if (slcan_single_frame_pending() && s_commander.stopped && s_commander.frame_slot_time_left_ms == 0) {
         // The single frame schedule has finished and its frame slot (including the response) has

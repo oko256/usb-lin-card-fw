@@ -58,6 +58,14 @@ def t1(lin_id: int, data: bytes) -> str:
     return f"t1{lin_id:02X}{len(data)}{data.hex().upper()}"
 
 
+def t2(lin_id: int, data: bytes) -> str:
+    return f"t2{lin_id:02X}{len(data)}{data.hex().upper()}"
+
+
+def t3(lin_id: int, data: bytes) -> str:
+    return f"t3{lin_id:02X}{len(data)}{data.hex().upper()}"
+
+
 def r0(lin_id: int, length: int) -> str:
     return f"r0{lin_id:02X}{length}"
 

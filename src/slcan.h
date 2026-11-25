@@ -17,9 +17,11 @@
 #define LOW_NIBBLE(b)    ((b) & 0x0F)
 
 /// Number of commander schedule entries and responder frames that can be configured.
-#define SLCAN_TABLE_MAX_SIZE 32
+#define SLCAN_TABLE_MAX_SIZE      32
 /// Maximum length of one output line.
-#define SLCAN_TX_LINE_MAX    64
+#define SLCAN_TX_LINE_MAX         64
+/// Number of responses that can be queued with "t3" (must be a power of 2).
+#define SLCAN_RESPONSE_QUEUE_SIZE 16
 
 typedef enum {
     /// LIN receiver overrun: received byte(s) were lost.
@@ -105,6 +107,11 @@ minlin_frame*                slcan_responder_frames(uint8_t* out_count);
 const minlin_schedule_entry* slcan_single_frame_schedule(void);
 /// Returns the responder frame of the single frame.
 minlin_frame*                slcan_single_frame(void);
+
+/// Application calls this after @p frame, an entry of slcan_responder_frames(), has been published.
+/// Reports the frame to the client if its response has been changed with "t2" or "t3", and moves
+/// the next queued response (if any) into it.
+void slcan_response_published(minlin_frame* frame);
 
 /// Returns the maximum time in milliseconds a single byte can take with current baud rate.
 uint32_t slcan_max_lin_byte_time_ms(void);
