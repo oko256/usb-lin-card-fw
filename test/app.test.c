@@ -151,6 +151,97 @@ void test_command_frame(void)
     TEST_ASSERT_EQUAL(0, s_read_flags());
 }
 
+/// Asserts that the bus contains exactly given response (with its checksum) and clears it.
+static void s_assert_bus_response(uint8_t id, const uint8_t* payload, uint8_t len)
+{
+    const minlin_config config = {0};
+    TEST_ASSERT_EQUAL(len + 1, g_bus_len);
+    for (uint8_t i = 0; i < len; ++i) {
+        TEST_ASSERT_EQUAL_HEX16(payload[i], g_bus[i]);
+    }
+    TEST_ASSERT_EQUAL_HEX16(minlin_checksum(&config, id, payload, len, NULL), g_bus[len]);
+    s_echo();
+    s_bus_clear();
+}
+
+void test_queued_responses(void)
+{
+    s_cmd("t1222AABB", OK);
+    s_cmd("O", OK);
+    s_cmd("t32221111", OK);
+    s_cmd("t32222222", OK);
+
+    const uint8_t expected[4][2] = {{0xAA, 0xBB}, {0x11, 0x11}, {0x22, 0x22}, {0x22, 0x22}};
+    const char*   reports[4]     = {"t0222AABB" OK, "t02221111" OK, "t02222222" OK, "t02222222" OK};
+    for (uint32_t i = 0; i < 4; ++i) {
+        // Another node sends the header: the current response is published, then reported.
+        s_rx_header(0x22);
+        usb_out_clear();
+        s_poll_at(10 * i);
+        s_assert_bus_response(0x22, expected[i], 2);
+        TEST_ASSERT_EQUAL_STRING(reports[i], g_usb_out);
+    }
+
+    // Replacing takes effect from the next header.
+    s_cmd("t32223333", OK);
+    s_cmd("t2222CAFE", OK);
+    s_rx_header(0x22);
+    usb_out_clear();
+    s_poll_at(50);
+    const uint8_t replaced[2] = {0xCA, 0xFE};
+    s_assert_bus_response(0x22, replaced, 2);
+    TEST_ASSERT_EQUAL_STRING("t0222CAFE" OK, g_usb_out);
+    TEST_ASSERT_EQUAL(0, s_read_flags());
+}
+
+void test_replacing_response_keeps_frame_in_progress(void)
+{
+    // The tables aren't reloaded, so a frame being received at the same time isn't dropped.
+    s_cmd("r1212", OK);
+    s_cmd("t1222AABB", OK);
+    s_cmd("O", OK);
+    const uint8_t data[2] = {0x10, 0x20};
+    s_rx_header(0x21);
+    app_lin_rx_byte(data[0], false);
+    s_cmd("t2222CAFE", OK);
+    app_lin_rx_byte(data[1], false);
+    const minlin_config config = {0};
+    app_lin_rx_byte(minlin_checksum(&config, 0x21, data, 2, NULL), false);
+    usb_out_clear();
+    s_poll_at(1);
+    TEST_ASSERT_EQUAL_STRING("t02121020" OK, g_usb_out);
+    TEST_ASSERT_EQUAL(0, s_read_flags());
+}
+
+void test_single_frame_is_not_reported(void)
+{
+    // The single frame uses its own table: it's neither reported nor advanced by the queue.
+    s_cmd("t1222AABB", OK);
+    s_cmd("t32221111", OK);
+    s_cmd("O", OK);
+    s_cmd("t0222CAFE", OK);
+    s_poll_at(0);
+    s_echo();
+    usb_out_clear();
+    s_poll_at(0);
+    const uint8_t       payload[2]  = {0xCA, 0xFE};
+    const minlin_config config      = {0};
+    const uint8_t       response[3] = {0xCA, 0xFE, minlin_checksum(&config, 0x22, payload, 2, NULL)};
+    s_assert_bus_frame(0x22, response, 3);
+    s_echo();
+    TEST_ASSERT_EQUAL_STRING("", g_usb_out);
+    s_bus_clear();
+    // Back to the configured table, whose response hasn't advanced.
+    s_poll_at(20);
+    TEST_ASSERT_FALSE(slcan_single_frame_pending());
+    s_rx_header(0x22);
+    usb_out_clear();
+    s_poll_at(21);
+    const uint8_t current[2] = {0xAA, 0xBB};
+    s_assert_bus_response(0x22, current, 2);
+    TEST_ASSERT_EQUAL_STRING("t0222AABB" OK, g_usb_out);
+}
+
 void test_single_frame_in_open_mode(void)
 {
     s_cmd("R0010000A1", OK);
@@ -450,6 +541,9 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_schedule_and_subscription);
     RUN_TEST(test_command_frame);
+    RUN_TEST(test_queued_responses);
+    RUN_TEST(test_replacing_response_keeps_frame_in_progress);
+    RUN_TEST(test_single_frame_is_not_reported);
     RUN_TEST(test_single_frame_in_open_mode);
     RUN_TEST(test_single_frame_resumes_schedule_without_echo);
     RUN_TEST(test_single_frame_in_monitor_mode);

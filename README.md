@@ -113,6 +113,31 @@ Changes take effect immediately. When the channel is open, the schedule then res
 All of them reply CR, or BEL if the command is malformed or a needed table is full. `R0`, `r0` and
 `T0` need room in both tables.
 
+### Changing published responses
+
+These change the response of a published ID (added with `t1` or `T0`) in place. The tables are
+not reloaded, so the schedule doesn't restart, and no frame in progress is dropped.
+
+| Command | Description |
+|---|---|
+| `t2iildd...` | Replace the response of ID `ii` with `dd...`, from its next publish on. Also clears the responses queued for `ii`. |
+| `t3iildd...` | Queue the response `dd...` for ID `ii`. After each publish of `ii`, the next queued response replaces its response. When the queue is empty, the last response keeps being published. |
+
+- **The queue** holds at most **16** responses, all for one ID at a time.
+- **Replies:** both reply CR. They reply BEL if:
+  - the line is malformed;
+  - `ii` isn't a published ID;
+  - `l` differs from the ID's payload length.
+
+  `t3` also replies BEL if the queue is full, or if it holds responses for another ID.
+- **Reporting:** once an ID's response has been changed with `t2` or `t3`, each of its publishes is reported like a
+  received frame (see [Received frames](#received-frames)). So a client can keep the queue filled
+  and know what was sent.
+- **Lifetime:** `w` clears the queue and stops the reporting.
+
+A response counts as published once the card has started sending it. In rare cases a new BREAK
+interrupts the response, and it is then still reported.
+
 The automatic slot time of `r0` and `t0` is the LIN maximum frame time with a 2.0 margin instead of 1.4:
 `ceil((88 + 20 × l) bit times)`. E.g. 6 ms for 1 byte and 13 ms for 8 bytes at 19200 baud.
 
@@ -133,7 +158,7 @@ is still being sent. In that case, retry after the frame's slot time.
 | `t0ii0` | Monitoring mode only: a header with ID `ii` that got no response. |
 
 - **Open mode:** subscribed frames (`R0`, `r0`, `r1`) are reported. Frames the card publishes itself
-  are not.
+  are not, unless their response has been changed with `t2` or `t3`.
 - **Monitoring mode:** every frame on the bus is reported, including the ones the card sent with `t0`.
 - **Frames with errors** (bad checksum, wrong length, no response) are not reported. They latch error
   flag `0x80` instead.
@@ -176,6 +201,20 @@ the command frame with ID `20`:
                      < t0202CAFE       (whenever the commander sends it)
 ```
 
+Responder streaming a sequence of responses to ID `10`: each publish is reported, and the next
+queued response takes its place:
+
+```
+> t1 10 2 0000       < CR
+> O                  < CR
+> t3 10 2 0001       < CR
+> t3 10 2 0002       < CR
+                     < t01020000       (published when the commander sent the header)
+                     < t01020001       (next header)
+> t3 10 2 0003       < CR
+                     < t01020002
+```
+
 Monitoring the bus at 9600 baud and sending one frame:
 
 ```
@@ -205,7 +244,8 @@ candump can0                    # dump all received frames, you could also use w
 - Single LIN channel, at the preset baud rates (2400, 9600, 10400, 19200) only. There's no automatic
   baud rate detection.
 - No persistent configuration. Defaults are loaded at power-on.
-- Entries can't be edited or removed individually; only the whole tables can be wiped (`w`).
+- Entries can't be removed individually; only the whole tables can be wiped (`w`). Only the
+  responses of published IDs can be changed (`t2`, `t3`).
 - The payload length of each subscribed or published ID is fixed in the table.
 - **LIN features not implemented:**
   - Sleep and wake-up: no go-to-sleep command handling, and no wake-up pulse detection or generation.

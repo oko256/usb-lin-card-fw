@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from usblincard import FLAG_LIN_FRAME, R0, T0, r1, t0, t1
+from usblincard import FLAG_LIN_FRAME, R0, T0, r1, t0, t1, t2, t3
 
 
 def test_traffic_between_devices(dev1, dev2):
@@ -75,6 +75,58 @@ def test_command_frame_to_subscriber(dev1, dev2):
     assert len(frames) >= 18
     assert all(f.text == "t0202CAFE" for f in frames)
     assert dev1.frames() == []
+
+
+def test_replaced_response(dev1, dev2):
+    dev2.cmd_ok(t1(0x10, bytes.fromhex("DEADBEEF")))
+    dev2.cmd_ok("O")
+    dev1.cmd_ok(R0(0x10, 20, 4))
+    dev1.cmd_ok("O")
+    time.sleep(0.2)
+    assert dev2.frames() == []  # Not reported before t2.
+    dev2.cmd_ok(t2(0x10, bytes.fromhex("CAFEBABE")))
+    dev1.clear_frames()
+    frames = dev1.collect_frames(0.5)
+    # The first one may have been published before the replace.
+    assert len(frames) >= 20
+    assert all(f.text == "t0104CAFEBABE" for f in frames[1:])
+    # From now on its publishes are reported.
+    reports = dev2.frames()
+    assert len(reports) >= 20
+    assert all(f.text == "t0104CAFEBABE" for f in reports)
+
+
+def test_queued_responses_are_streamed(dev1, dev2):
+    # The client keeps the queue filled as the card reports its publishes: the commander gets every
+    # response once, in order, even when polling every 10 ms.
+    count = 300
+    depth = 16
+    dev2.cmd_ok(t1(0x10, (0).to_bytes(2, "big")))
+    dev2.cmd_ok("O")
+    queued = 1
+    while queued <= depth:
+        dev2.cmd_ok(t3(0x10, queued.to_bytes(2, "big")))
+        queued += 1
+    assert not dev2.cmd(t3(0x10, b"\xff\xff")).ok  # Full.
+    dev1.cmd_ok(R0(0x10, 10, 2))
+    dev1.cmd_ok("O")
+    deadline = time.monotonic() + 10
+    while queued < count:
+        assert time.monotonic() < deadline
+        # Each report except the first one took a response from the queue.
+        if queued - len(dev2.frames()) < depth:
+            dev2.cmd_ok(t3(0x10, queued.to_bytes(2, "big")))
+            queued += 1
+        else:
+            time.sleep(0.001)
+    time.sleep(0.5)
+    dev1.cmd_ok("C")
+    time.sleep(0.05)
+    values = [int.from_bytes(f.data, "big") for f in dev1.frames()]
+    assert values[:count] == list(range(count))
+    assert set(values[count:]) == {count - 1}  # The last one repeats.
+    reports = [int.from_bytes(f.data, "big") for f in dev2.frames()]
+    assert reports == values
 
 
 def assert_cyclic(ids: list[int], schedule: list[int], min_cycles: int):

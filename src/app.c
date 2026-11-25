@@ -39,10 +39,17 @@ bool minlin_hw_check_and_clear_break(void)
 
 void minlin_responder_subscribe_callback(const minlin_frame* frame) { slcan_send_frame(frame); }
 
+/// Frame of the configured responder table that the responder task is publishing, if any.
+static minlin_frame* s_published_frame = NULL;
+
 bool minlin_responder_publish_callback(minlin_frame* frame)
 {
-    (void)frame; // UNUSED
-    // Payload we want to publish is already stored in the frame struct.
+    // Payload we want to publish is already stored in the frame struct. Frames of the configured
+    // table are handed to slcan after the publish (its next queued response may replace the payload,
+    // which must not happen before minlin has taken it for transmitting).
+    if (frame != slcan_single_frame()) {
+        s_published_frame = frame;
+    }
     return true;
 }
 
@@ -90,6 +97,10 @@ static void s_run_commander_and_responder(uint32_t now_ms)
 {
     s_latch_minlin_result(minlin_commander_task(&s_commander, now_ms));
     s_latch_minlin_result(minlin_responder_task(&s_responder));
+    if (s_published_frame != NULL) {
+        slcan_response_published(s_published_frame);
+        s_published_frame = NULL;
+    }
 
     if (slcan_single_frame_pending() && s_commander.stopped && s_commander.frame_slot_time_left_ms == 0) {
         // The single frame schedule has finished and its frame slot (including the response) has
